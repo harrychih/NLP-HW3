@@ -8,6 +8,8 @@ import logging
 import math
 from pathlib import Path
 import os
+from collections import defaultdict
+import matplotlib.pyplot as plt
 
 from probs import Wordtype, LanguageModel, num_tokens, read_trigrams
 
@@ -67,6 +69,29 @@ def file_log_prob(file: Path, lm: LanguageModel) -> float:
         log_prob += lm.log_prob(x, y, z)  # log p(z | xy)
     return log_prob
 
+def fileLen_extract(file: Path) -> int:
+    basePath = os.path.basename(file)
+    return int(basePath.split('.')[1])
+
+def fileLen_classification_acc(corrClassifiedInfo: dict, incorrClassifiedInfo: dict) -> dict:
+    # if corrClassifiedInfo.keys() != incorrClassifiedInfo.keys():
+    #     raise ValueError('wrong classification info given!')
+    acc_dict = defaultdict(float)
+    for l in corrClassifiedInfo:
+        corr = corrClassifiedInfo[l]
+        err = incorrClassifiedInfo[l]
+        acc_dict[l] = corr / (corr+err)
+    return acc_dict
+
+def plot_and_save_acc(acc_dict: dict, lambda_star: float) -> None:
+    plt.figure(figsize=(10, 3))
+    plt.bar(acc_dict.keys(), acc_dict.values(), width=10)
+    plt.xlabel("File Length")
+    plt.ylabel(f"Classification Accuracy of add {lambda_star}")
+    plt.show()
+    plt.savefig(f"filelen-acc-add {lambda_star}.png")
+    print("Done ploting....And Saved!")
+
 
 def main():
     args = parse_args()
@@ -96,29 +121,42 @@ def main():
     correct_classified2 = 0
     incorrect_classified1 = 0
     incorrect_classified2 = 0
+    corrClassifiedInfo = defaultdict(int)
+    incorrClassifiedInfo = defaultdict(int)
+
     for file in args.test_files:
         log_prob1: float = file_log_prob(file, lm1)
         log_prob2: float = file_log_prob(file, lm2)
+
         log_post_prob1: float = log_prior_prob1 + log_prob1
         log_post_prob2: float = log_prior_prob2 + log_prob2
+
+        
         if log_post_prob1 >= log_post_prob2:
             model1_files += 1
             print(f"{args.model1}\t{os.path.basename(file)}")
+
             # filename = model1name
-            if str(args.model1).split('.')[0] == os.path.basename(file).split('.')[0]:
+            if str(args.model1).split('.')[0].split("-")[0] == os.path.basename(file).split('.')[0]:
                 correct_classified1 += 1
+                corrClassifiedInfo[fileLen_extract(file)] += 1
             # filename = model2name
             else:
                 incorrect_classified1 += 1
+                incorrClassifiedInfo[fileLen_extract(file)] += 1
+
         else:
             model2_files += 1
             print(f"{args.model2}\t{os.path.basename(file)}")
+
             # filename = model2name
             if str(args.model2).split('.')[0] == os.path.basename(file).split('.')[0]:
                 correct_classified2 += 1
+                corrClassifiedInfo[fileLen_extract(file)] += 1
             # filename = model1name
             else:
                 incorrect_classified2 += 1
+                incorrClassifiedInfo[fileLen_extract(file)] += 1
     
 
 
@@ -126,6 +164,8 @@ def main():
     # But cross-entropy is conventionally measured in bits: so when it's
     # time to print cross-entropy, we convert log base e to log base 2, 
     # by dividing by log(2).
+
+    # Compute Error Rate
     correct_classified = correct_classified1 + correct_classified2
     incorrect_classified = incorrect_classified1 + incorrect_classified2
     # dev2_acc = correct_classified2 / (incorrect_classified1 + correct_classified2)
@@ -133,6 +173,12 @@ def main():
     acc = correct_classified/len(args.test_files)
     err_rate = 1 - acc
     print(f"Total Error Rate: {err_rate:.4%}")
+
+    # Plot the fileLen-acc plot
+    acc_dict = fileLen_classification_acc(corrClassifiedInfo, incorrClassifiedInfo)
+    lambda_star = float('.'.join(str(args.model1).split('-')[2].split('.')[0:2]))
+    plot_and_save_acc(acc_dict, lambda_star)
+
     # bits = -total_log_prob / math.log(2)   # convert to bits of surprisal
     # tokens = sum(num_tokens(test_file) for test_file in args.test_files)
     fileNum = model1_files + model2_files

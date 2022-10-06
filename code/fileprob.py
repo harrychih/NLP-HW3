@@ -7,6 +7,8 @@ import argparse
 import logging
 import math
 from pathlib import Path
+import os
+
 
 from probs import Wordtype, LanguageModel, num_tokens, read_trigrams
 

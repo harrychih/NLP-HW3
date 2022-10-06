@@ -77,8 +77,8 @@ def main():
     lm2 = LanguageModel.load(args.model2)
     prior_prob1 = args.prior_probability
     prior_prob2 = 1 - prior_prob1
-    log_prior_prob1 = math.log(prior_prob1)
-    log_prior_prob2 = math.log(prior_prob2)
+    log_prior_prob1 = math.log(prior_prob1) if prior_prob1 != 0 else float("-inf")
+    log_prior_prob2 = math.log(prior_prob2) if prior_prob2 != 0 else float("-inf")
     
     # We use natural log for our internal computations and that's
     # the kind of log-probability that file_log_prob returns.
@@ -92,22 +92,33 @@ def main():
     total_log_prob = 0.0
     model1_files = 0
     model2_files = 0
-    correct_classified = 0
+    correct_classified1 = 0
+    correct_classified2 = 0
+    incorrect_classified1 = 0
+    incorrect_classified2 = 0
     for file in args.test_files:
         log_prob1: float = file_log_prob(file, lm1)
         log_prob2: float = file_log_prob(file, lm2)
         log_post_prob1: float = log_prior_prob1 + log_prob1
         log_post_prob2: float = log_prior_prob2 + log_prob2
-        if log_post_prob1 < log_post_prob2:
+        if log_post_prob1 >= log_post_prob2:
             model1_files += 1
             print(f"{args.model1}\t{os.path.basename(file)}")
+            # filename = model1name
             if str(args.model1).split('.')[0] == os.path.basename(file).split('.')[0]:
-                correct_classified += 1
+                correct_classified1 += 1
+            # filename = model2name
+            else:
+                incorrect_classified1 += 1
         else:
             model2_files += 1
             print(f"{args.model2}\t{os.path.basename(file)}")
+            # filename = model2name
             if str(args.model2).split('.')[0] == os.path.basename(file).split('.')[0]:
-                correct_classified += 1
+                correct_classified2 += 1
+            # filename = model1name
+            else:
+                incorrect_classified2 += 1
     
 
 
@@ -115,6 +126,10 @@ def main():
     # But cross-entropy is conventionally measured in bits: so when it's
     # time to print cross-entropy, we convert log base e to log base 2, 
     # by dividing by log(2).
+    correct_classified = correct_classified1 + correct_classified2
+    incorrect_classified = incorrect_classified1 + incorrect_classified2
+    # dev2_acc = correct_classified2 / (incorrect_classified1 + correct_classified2)
+    # print(f"{dev2_acc:.4%}")
     acc = correct_classified/len(args.test_files)
     err_rate = 1 - acc
     print(f"Total Error Rate: {err_rate:.4%}")

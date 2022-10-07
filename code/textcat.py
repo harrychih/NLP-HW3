@@ -186,7 +186,7 @@ def main():
     data = np.stack((fileL, acc_corr), axis=0)
     corr_plot = sns.heatmap(data)
     corr_fig = corr_plot.get_figure()
-    corr_fig.savefig(f"filelen-acc-corr-add {lambda_star}.jpg")
+    corr_fig.savefig(f"{str(args.model1)}-{str(args.model2)}-filelen-acc-corr-add {lambda_star}.jpg")
 
     # bits = -total_log_prob / math.log(2)   # convert to bits of surprisal
     # tokens = sum(num_tokens(test_file) for test_file in args.test_files)

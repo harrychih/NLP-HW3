@@ -140,24 +140,24 @@ def main():
             # filename = model1name
             if str(args.model1).split('.')[0].split("-")[0] == os.path.basename(file).split('.')[0]:
                 correct_classified1 += 1
-                # corrClassifiedInfo[fileLen_extract(file)] += 1
+                corrClassifiedInfo[fileLen_extract(file)] += 1
             # filename = model2name
             else:
                 incorrect_classified1 += 1
-                # incorrClassifiedInfo[fileLen_extract(file)] += 1
+                incorrClassifiedInfo[fileLen_extract(file)] += 1
 
         else:
             model2_files += 1
             print(f"{args.model2}\t{os.path.basename(file)}")
 
             # filename = model2name
-            if str(args.model2).split('.')[0] == os.path.basename(file).split('.')[0]:
+            if str(args.model2).split('.')[0].split("-")[0] == os.path.basename(file).split('.')[0]:
                 correct_classified2 += 1
-                # corrClassifiedInfo[fileLen_extract(file)] += 1
+                corrClassifiedInfo[fileLen_extract(file)] += 1
             # filename = model1name
             else:
                 incorrect_classified2 += 1
-                # incorrClassifiedInfo[fileLen_extract(file)] += 1
+                incorrClassifiedInfo[fileLen_extract(file)] += 1
     
 
 
@@ -177,7 +177,7 @@ def main():
 
     # Plot the fileLen-acc plot and correlation heatmap
     acc_dict = fileLen_classification_acc(corrClassifiedInfo, incorrClassifiedInfo)
-    lambda_star = float('.'.join(str(args.model1).split('-')[2].split('.')[0:2]))
+    lambda_star = float('.'.join(str(args.model1).split('-')[-1].split('.')[0:2]))
 
     plot_and_save_acc(acc_dict, lambda_star, str(args.model1), str(args.model2))
 

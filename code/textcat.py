@@ -124,7 +124,8 @@ def main():
     incorrect_classified2 = 0
     corrClassifiedInfo = defaultdict(int)
     incorrClassifiedInfo = defaultdict(int)
-
+    model1_name = str(os.path.basename(args.model1))
+    model2_name = str(os.path.basename(args.model2))
     for file in args.test_files:
         log_prob1: float = file_log_prob(file, lm1)
         log_prob2: float = file_log_prob(file, lm2)
@@ -135,7 +136,7 @@ def main():
 
         if log_post_prob1 >= log_post_prob2:
             model1_files += 1
-            print(f"{args.model1}\t{os.path.basename(file)}")
+            print(f"{model1_name}\t{os.path.basename(file)}")
 
             # filename = model1name
             if str(os.path.basename(args.model1)).split('.')[0].split("-")[0] == os.path.basename(file).split('.')[0]:
@@ -148,7 +149,7 @@ def main():
 
         else:
             model2_files += 1
-            print(f"{args.model2}\t{os.path.basename(file)}")
+            print(f"{model2_name}\t{os.path.basename(file)}")
 
             # filename = model2name
             if str(os.path.basename(args.model2)).split('.')[0].split("-")[0] == os.path.basename(file).split('.')[0]:
@@ -165,35 +166,34 @@ def main():
     # But cross-entropy is conventionally measured in bits: so when it's
     # time to print cross-entropy, we convert log base e to log base 2, 
     # by dividing by log(2).
-    model1_name = str(os.path.basename(args.model1))
-    model2_name = str(os.path.basename(args.model2))
+
     # Compute Error Rate
     correct_classified = correct_classified1 + correct_classified2
     incorrect_classified = incorrect_classified1 + incorrect_classified2
-    # dev2_acc = correct_classified2 / (incorrect_classified1 + correct_classified2)
-    # print(f"{dev2_acc:.4%}")
+    # # dev2_acc = correct_classified2 / (incorrect_classified1 + correct_classified2)
+    # # print(f"{dev2_acc:.4%}")
     acc = correct_classified/len(args.test_files)
     err_rate = 1 - acc
     print(f"Total Error Rate: {err_rate:.4%}")
 
     # Plot the fileLen-acc plot and correlation heatmap
-    acc_dict = fileLen_classification_acc(corrClassifiedInfo, incorrClassifiedInfo)
-    lambda_star = float('.'.join(str(args.model1).split('-')[-1].split('.')[0:2]))
-    plot_and_save_acc(acc_dict, lambda_star, model1_name, model2_name)
+    # acc_dict = fileLen_classification_acc(corrClassifiedInfo, incorrClassifiedInfo)
+    # lambda_star = float('.'.join(str(args.model1).split('-')[-1].split('.')[0:2]))
+    # plot_and_save_acc(acc_dict, lambda_star, model1_name, model2_name)
 
 
-    with open(f"acc_txt_data/{model1_name}-{model2_name}-FileLength-Acc.txt", "w") as f:
-        for l in acc_dict:
-            f.writelines(f"{l}\t{acc_dict[l]}\n")
+    # with open(f"acc_txt_data/{model1_name}-{model2_name}-FileLength-Acc.txt", "w") as f:
+    #     for l in acc_dict:
+    #         f.writelines(f"{l}\t{acc_dict[l]}\n")
 
     
-    fileL = np.array(list(acc_dict.keys()))
-    acc_corr = np.array(list(acc_dict.values()))
+    # fileL = np.array(list(acc_dict.keys()))
+    # acc_corr = np.array(list(acc_dict.values()))
 
-    data = np.stack((fileL, acc_corr), axis=0)
-    corr_plot = sns.heatmap(data)
-    corr_fig = corr_plot.get_figure()
-    corr_fig.savefig(f"plot/{model1_name}-{model2_name}-filelen-acc-corr-add {lambda_star}.jpg")
+    # data = np.stack((fileL, acc_corr), axis=0)
+    # corr_plot = sns.heatmap(data)
+    # corr_fig = corr_plot.get_figure()
+    # corr_fig.savefig(f"plot/{model1_name}-{model2_name}-filelen-acc-corr-add {lambda_star}.jpg")
 
     # bits = -total_log_prob / math.log(2)   # convert to bits of surprisal
     # tokens = sum(num_tokens(test_file) for test_file in args.test_files)

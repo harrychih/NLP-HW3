@@ -32,6 +32,8 @@ from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
 from typing import Counter
 from collections import Counter
+from random import choices
+import numpy as np
 
 patch_typeguard()   # makes @typechecked work with torchtyping
 
@@ -129,6 +131,52 @@ def draw_trigrams_forever(file: Path,
         while True:
             for trigram in random.sample(pool, len(pool)):
                 yield trigram
+
+def sample(file: Path, lm: LanguageModel, num_sentences, max_length) -> None:
+    vocab = lm.vocab
+    event_count = lm.event_count
+    context_count = lm.context_count
+    x, y = "BOS", "BOS"
+    cur_length = 0
+    prob_dict = {}
+    weight_dict = {}
+    res = ""
+    sentence = " "
+    assert 'EOS' in vocab
+    def create_sentence(xs, ys, cur_length, max_length, sentence):
+
+        deleteWords = ['BOS','EOS']
+        def create_word(xw, yw):
+            for w in vocab:
+                prob_dict[w]=math.exp(lm.log_prob(xw,yw,w))
+            total_prob = sum([p for p in list(prob_dict.values())])
+            for w in prob_dict:
+                weight_dict[w] = prob_dict[w] / total_prob
+            choices_list = tuple(weight_dict.keys())
+            newWord = choices(choices_list, weights=tuple(weight_dict.values()))
+
+            return newWord[0]
+
+        zs = create_word(xs, ys)
+
+        if zs == 'EOS':
+            return sentence
+
+        tempsentence = sentence
+        tempsentence += zs + " " if zs not in deleteWords else ""
+        if cur_length+1 > max_length-1:
+            tempsentence += ".."
+            return tempsentence
+
+        return create_sentence(ys, zs, cur_length+1, max_length, tempsentence)
+
+            
+    
+    for i in range(num_sentences):
+        res += create_sentence(x,y,0, max_length, sentence) + ".\n"
+
+    return res
+
 
 ##### READ IN A VOCABULARY (e.g., from a file created by build_vocab.py)
 
@@ -262,6 +310,8 @@ class LanguageModel:
         self.progress += 1
         if self.progress % freq == 1:
             sys.stderr.write(".")
+    
+
 
 
 ##### SPECIFIC FAMILIES OF LANGUAGE MODELS
@@ -296,6 +346,7 @@ class UniformLanguageModel(CountBasedLanguageModel):
 class AddLambdaLanguageModel(CountBasedLanguageModel):
     def __init__(self, vocab: Vocab, lambda_: float) -> None:
         super().__init__(vocab)
+        
 
         if lambda_ < 0:
             raise ValueError("negative lambda argument of {lambda_}")
@@ -315,10 +366,17 @@ class AddLambdaLanguageModel(CountBasedLanguageModel):
 class BackoffAddLambdaLanguageModel(AddLambdaLanguageModel):
     def __init__(self, vocab: Vocab, lambda_: float) -> None:
         super().__init__(vocab, lambda_)
+        if lambda_ < 0:
+            raise ValueError("negative lambda argument of {lambda_}")
+        self.lambda_ = lambda_
 
     def prob(self, x: Wordtype, y: Wordtype, z: Wordtype) -> float:
         # TODO: Reimplement me so that I do backoff
-        return super().prob(x, y, z)
+
+        prob_z = (self.event_count[z, ] + self.lambda_)/(self.context_count[()]+ self.lambda_*self.vocab_size)
+        prob_z_given_y = (self.event_count[y, z] + self.lambda_*self.vocab_size*prob_z) / (self.context_count[z, ] + self.lambda_*self.vocab_size)
+        return (self.event_count[x,y,z] + self.lambda_*self.vocab_size*prob_z_given_y) / (self.context_count[x, y] + self.lambda_*self.vocab_size)
+        # super().prob(x, y, z)
         # Don't forget the difference between the Wordtype z and the
         # 1-element tuple (z,). If you're looking up counts,
         # these will have very different counts!

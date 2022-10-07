@@ -10,6 +10,8 @@ from pathlib import Path
 import os
 from collections import defaultdict
 import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 
 from probs import Wordtype, LanguageModel, num_tokens, read_trigrams
 
@@ -83,13 +85,12 @@ def fileLen_classification_acc(corrClassifiedInfo: dict, incorrClassifiedInfo: d
         acc_dict[l] = corr / (corr+err)
     return acc_dict
 
-def plot_and_save_acc(acc_dict: dict, lambda_star: float) -> None:
-    plt.figure(figsize=(10, 3))
-    plt.bar(acc_dict.keys(), acc_dict.values(), width=10)
+def plot_and_save_acc(acc_dict: dict, lambda_star: float, model1: str, model2: str) -> None:
+    plt.figure(figsize=(10, 5))
+    plt.bar(acc_dict.keys(), acc_dict.values(), width=2, linewidth=20)
     plt.xlabel("File Length")
     plt.ylabel(f"Classification Accuracy of add {lambda_star}")
-    plt.show()
-    plt.savefig(f"filelen-acc-add {lambda_star}.png")
+    plt.savefig(f"{model1}-{model2}-filelen-acc-add {lambda_star}.jpg")
     print("Done ploting....And Saved!")
 
 
@@ -139,11 +140,11 @@ def main():
             # filename = model1name
             if str(args.model1).split('.')[0].split("-")[0] == os.path.basename(file).split('.')[0]:
                 correct_classified1 += 1
-                corrClassifiedInfo[fileLen_extract(file)] += 1
+                # corrClassifiedInfo[fileLen_extract(file)] += 1
             # filename = model2name
             else:
                 incorrect_classified1 += 1
-                incorrClassifiedInfo[fileLen_extract(file)] += 1
+                # incorrClassifiedInfo[fileLen_extract(file)] += 1
 
         else:
             model2_files += 1
@@ -152,11 +153,11 @@ def main():
             # filename = model2name
             if str(args.model2).split('.')[0] == os.path.basename(file).split('.')[0]:
                 correct_classified2 += 1
-                corrClassifiedInfo[fileLen_extract(file)] += 1
+                # corrClassifiedInfo[fileLen_extract(file)] += 1
             # filename = model1name
             else:
                 incorrect_classified2 += 1
-                incorrClassifiedInfo[fileLen_extract(file)] += 1
+                # incorrClassifiedInfo[fileLen_extract(file)] += 1
     
 
 
@@ -174,10 +175,18 @@ def main():
     err_rate = 1 - acc
     print(f"Total Error Rate: {err_rate:.4%}")
 
-    # Plot the fileLen-acc plot
+    # Plot the fileLen-acc plot and correlation heatmap
     acc_dict = fileLen_classification_acc(corrClassifiedInfo, incorrClassifiedInfo)
     lambda_star = float('.'.join(str(args.model1).split('-')[2].split('.')[0:2]))
-    plot_and_save_acc(acc_dict, lambda_star)
+
+    plot_and_save_acc(acc_dict, lambda_star, str(args.model1), str(args.model2))
+
+    fileL = np.array(list(acc_dict.keys()))
+    acc_corr = np.array(list(acc_dict.values()))
+    data = np.stack((fileL, acc_corr), axis=0)
+    corr_plot = sns.heatmap(data)
+    corr_fig = corr_plot.get_figure()
+    corr_fig.savefig(f"filelen-acc-corr-add {lambda_star}.jpg")
 
     # bits = -total_log_prob / math.log(2)   # convert to bits of surprisal
     # tokens = sum(num_tokens(test_file) for test_file in args.test_files)

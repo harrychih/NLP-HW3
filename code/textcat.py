@@ -178,8 +178,8 @@ def main():
     # Plot the fileLen-acc plot and correlation heatmap
     acc_dict = fileLen_classification_acc(corrClassifiedInfo, incorrClassifiedInfo)
     lambda_star = float('.'.join(str(args.model1).split('-')[-1].split('.')[0:2]))
+    plot_and_save_acc(acc_dict, lambda_star, str(args.model1), str(args.model2))
     
-    # plot_and_save_acc(acc_dict, lambda_star, str(args.model1), str(args.model2))
     with open(f"{str(args.model1)}-{str(args.model2)}-FileLength-Acc.txt", "w") as f:
         for l in acc_dict:
             f.writelines(f"{l}\t{acc_dict[l]}\n")
@@ -187,9 +187,9 @@ def main():
     fileL = np.array(list(acc_dict.keys()))
     acc_corr = np.array(list(acc_dict.values()))
     data = np.stack((fileL, acc_corr), axis=0)
-    # corr_plot = sns.heatmap(data)
-    # corr_fig = corr_plot.get_figure()
-    # corr_fig.savefig(f"{str(args.model1)}-{str(args.model2)}-filelen-acc-corr-add {lambda_star}.jpg")
+    corr_plot = sns.heatmap(data)
+    corr_fig = corr_plot.get_figure()
+    corr_fig.savefig(f"{str(args.model1)}-{str(args.model2)}-filelen-acc-corr-add {lambda_star}.jpg")
 
     # bits = -total_log_prob / math.log(2)   # convert to bits of surprisal
     # tokens = sum(num_tokens(test_file) for test_file in args.test_files)

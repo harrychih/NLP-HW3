@@ -24,6 +24,8 @@ import math
 import sys
 
 from pathlib import Path
+from time import gmtime
+from xmlrpc.client import FastMarshaller
 
 import torch
 from torch import nn
@@ -34,6 +36,7 @@ from typing import Counter
 from collections import Counter
 from random import choices
 import numpy as np
+import tqdm
 
 patch_typeguard()   # makes @typechecked work with torchtyping
 
@@ -372,11 +375,30 @@ class BackoffAddLambdaLanguageModel(AddLambdaLanguageModel):
 
     def prob(self, x: Wordtype, y: Wordtype, z: Wordtype) -> float:
         # TODO: Reimplement me so that I do backoff
+        total_prob = 0
+        num_tokens = self.vocab_size
 
-        prob_z = (self.event_count[z, ] + self.lambda_)/(self.context_count[()]+ self.lambda_*self.vocab_size)
-        prob_z_given_y = (self.event_count[y, z] + self.lambda_*self.vocab_size*prob_z) / (self.context_count[z, ] + self.lambda_*self.vocab_size)
-        return (self.event_count[x,y,z] + self.lambda_*self.vocab_size*prob_z_given_y) / (self.context_count[x, y] + self.lambda_*self.vocab_size)
-        # super().prob(x, y, z)
+        prob_z = (self.event_count[z, ] + self.lambda_) / \
+                 (self.context_count[()]+ self.lambda_*num_tokens)
+        prob_z_given_y = (self.event_count[y, z] + self.lambda_*num_tokens*prob_z) / \
+                         (self.context_count[y, ] + self.lambda_*num_tokens)
+        prob_z_given_xy = (self.event_count[x,y,z] + self.lambda_*num_tokens*prob_z_given_y) / \
+                          (self.context_count[x, y] + self.lambda_*num_tokens)
+
+        for zc in self.vocab:
+            prob_zc = (self.event_count[zc, ] + self.lambda_) / \
+                 (self.context_count[()]+ self.lambda_*num_tokens)
+            prob_zc_given_y = (self.event_count[y, zc] + self.lambda_*num_tokens*prob_zc) / \
+                                (self.context_count[y, ] + self.lambda_*num_tokens)
+            prob_zc_given_xy = (self.event_count[x,y,zc] + self.lambda_*num_tokens*prob_zc_given_y) / \
+                                (self.context_count[x, y] + self.lambda_*num_tokens)
+
+            total_prob += prob_zc_given_xy
+        
+        assert math.isclose(total_prob, 1, abs_tol=1e-8)
+
+        return prob_z_given_xy
+
         # Don't forget the difference between the Wordtype z and the
         # 1-element tuple (z,). If you're looking up counts,
         # these will have very different counts!
@@ -393,8 +415,11 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         self.l2: float = l2
 
         # TODO: READ THE LEXICON OF WORD VECTORS AND STORE IT IN A USEFUL FORMAT.
-        self.dim = 99999999999  # TODO: SET THIS TO THE DIMENSIONALITY OF THE VECTORS
-
+        self.vocab = vocab
+        self.lexicon, self.lexicon_vec = self.read_lexicon(lexicon_file)
+        self.l2 = l2
+        self.dim = self.lexicon_vec.shape[1]  # TODO: SET THIS TO THE DIMENSIONALITY OF THE VECTORS
+        self.vocab_dict, self.vocab_vec = self.get_vocab_vectors()
         # We wrap the following matrices in nn.Parameter objects.
         # This lets PyTorch know that these are parameters of the model
         # that should be listed in self.parameters() and will be
@@ -403,18 +428,86 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         # We can also store other tensors in the model class,
         # like constant coefficients that shouldn't be altered by
         # training, but those wouldn't use nn.Parameter.
-        self.X = nn.Parameter(torch.zeros((self.dim, self.dim)), requires_grad=True)
-        self.Y = nn.Parameter(torch.zeros((self.dim, self.dim)), requires_grad=True)
+        self.X = nn.Parameter(torch.ones((self.dim, self.dim)), requires_grad=True)
+        self.Y = nn.Parameter(torch.ones((self.dim, self.dim)), requires_grad=True)
+
+    def read_lexicon(self, lexicon_file: Path) -> tuple(dict, np.array):
+        with open(lexicon_file) as f:
+            FirstLine = f.readline()
+            shapeRaw = FirstLine.split()
+            shape = (int(shapeRaw[0]), int(shapeRaw[1]))
+            vecs = []
+            lexicon = {}
+            for i, line in enumerate(f):
+                word, vecStr = line.split()[0], line.split()[1:]
+                vec = [float(x) for x in vecStr]
+                vecs.append(vec)
+                lexicon[word] = i
+                lexicon[i] = word
+        np_vecs = np.array(vecs)
+
+        return (lexicon, np_vecs)
+
+    def missing_word_replace(self, word: str)-> str:
+        if word not in self.vocab or word not in self.lexicon or word == "OOV":
+            return "OOL"
+        return word
+    
+    def get_vocab_vectors(self) -> tuple(dict, np.array):
+        vocab = self.vocab
+        num_vocab = self.vocab_size
+        vocab_vec = np.zeros((num_vocab, self.lexicon_vec.shape[1]), dtype=self.lexicon_vec.dtype)
+        vocab_dict = {}
+        for i, token in enumerate(vocab):
+            token = self.missing_word_replace(token)
+            idx = self.lexicon[token]
+            token_vec = self.lexicon_vec[idx, :]
+            vocab_vec[i,:] = token_vec
+            vocab_dict[token] = i
+        
+        return (vocab_dict, vocab_vec)
+
+
+    def calculate_normalized_constant(self, x: Wordtype, y: Wordtype) -> float:
+        vocab_vec = self.vocab_vec
+        vocab_dict = self.vocab_dict
+        # if torch.backends.mps.is_available():
+        #     device = "mps" if torch.backends.mps.is_available() else "cpu"
+        vocab_vec_th = torch.tensor(vocab_vec, dtype=self.X.dtype)
+        x_idx = vocab_dict[self.missing_word_replace(x)]
+        y_idx = vocab_dict[self.missing_word_replace(y)]
+
+        
+
+        
+
+        x_vec = torch.tensor(vocab_vec[x_idx], dtype=self.X.dtype).reshape((1,self.dim))
+        y_vec = torch.tensor(vocab_vec[y_idx], dtype=self.X.dtype).reshape((1,self.dim))
+        norm_cons = (x_vec @ self.X @ vocab_vec_th.t()) + (y_vec @ self.Y @ vocab_vec_th.t())
+        
+
+        return torch.squeeze(norm_cons)
+
+    def regularizer(self, C, N, X, Y):
+        X_sum_squared = torch.sum(torch.square(X))
+        Y_sum_squared = torch.sum(torch.square(Y))
+        regu = C / N * (X_sum_squared + Y_sum_squared)
+
+        return regu
+
+
+
 
     def log_prob(self, x: Wordtype, y: Wordtype, z: Wordtype) -> float:
         """Return log p(z | xy) according to this language model."""
         # https://pytorch.org/docs/stable/generated/torch.Tensor.item.html
         return self.log_prob_tensor(x, y, z).item()
 
+
     @typechecked
     def log_prob_tensor(self, x: Wordtype, y: Wordtype, z: Wordtype) -> TensorType[()]:
         """Return the same value as log_prob, but stored as a tensor."""
-        
+
         # As noted below, it's important to use a tensor for training.
         # Most of your intermediate quantities, like logits below, will
         # also be stored as tensors.  (That is normal in PyTorch, so it
@@ -422,7 +515,7 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         # appended `_tensor` to the name of this method to distinguish
         # it from the class's general `log_prob` method.)
 
-        # TODO: IMPLEMENT ME!
+
         # This method should call the logits helper method.
         # You are free to define other helper methods too.
         #
@@ -430,13 +523,51 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         # compute the normalization constant Z, or this method
         # will be very slow. Some useful functions of pytorch that could
         # be useful are torch.logsumexp and torch.log_softmax.
-        raise NotImplementedError("Implement me!")
+        vocab = self.vocab
+        vocab_dict = self.vocab_dict
+        vocab_vec = self.vocab_vec
+
+        # if torch.backends.mps.is_available():
+        #     device = "mps" if torch.backends.mps.is_available() else "cpu"
+       
+        log_prob_z = self.logits(x, y, z)
+        norm_const = self.calculate_normalized_constant(x,y)
+        log_normalized_const = torch.logsumexp(norm_const, 0)#.to(device)
+
+        log_prob_z_xy = log_prob_z - log_normalized_const
+        
+        return log_prob_z_xy
+
 
     def logits(self, x: Wordtype, y: Wordtype, z: Wordtype) -> torch.Tensor:
         """Return a vector of the logs of the unnormalized probabilities, f(xyz) * θ.
         These are commonly known as "logits" or "log-odds": the values that you 
         exponentiate and renormalize in order to get a probability distribution."""
-        # TODO: IMPLEMENT ME!
+        
+        vocab_vec = self.vocab_vec
+        vocab_dict = self.vocab_dict
+
+        # if torch.backends.mps.is_available():
+        #     device = "mps" if torch.backends.mps.is_available() else "cpu"
+
+        x_idx = vocab_dict[self.missing_word_replace(x)]
+        y_idx = vocab_dict[self.missing_word_replace(y)]
+        z_idx = vocab_dict[self.missing_word_replace(z)]
+
+        x_vec = torch.tensor(vocab_vec[x_idx], dtype=self.X.dtype).reshape((1,self.dim))#.to(device)
+        y_vec = torch.tensor(vocab_vec[y_idx], dtype=self.X.dtype).reshape((1,self.dim))#.to(device)
+        z_vec = torch.tensor(vocab_vec[z_idx], dtype=self.X.dtype).reshape((1,self.dim))#.to(device)
+        
+        
+     
+        p_xyz = (x_vec @ self.X @ z_vec.t()) + (y_vec @ self.Y @ z_vec.t())
+    
+
+
+
+        
+
+        return p_xyz.reshape(())
         # Don't forget that you can create additional methods
         # that you think are useful, if you'd like.
         # It's cleaner than making this function massive.
@@ -448,7 +579,7 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         # The return type, TensorType[()], represents a torch.Tensor scalar.
         # See Question 7 in INSTRUCTIONS.md for more info about fine-grained 
         # type annotations for Tensors.
-        raise NotImplementedError("Implement me!")
+
 
     def train(self, file: Path):    # type: ignore
         
@@ -459,7 +590,7 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         ### The `type: ignore` comment above tells the type checker to ignore this inconsistency.
         
         # Optimization hyperparameters.
-        gamma0 = 0.1  # initial learning rate
+        gamma0 = 1e-4  # initial learning rate
 
         # This is why we needed the nn.Parameter above.
         # The optimizer needs to know the list of parameters
@@ -471,7 +602,10 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         nn.init.zeros_(self.Y)   # type: ignore
 
         N = num_tokens(file)
-        log.info("Start optimizing on {N} training tokens...")
+        log.info(f"Start optimizing on {N} training tokens...")
+
+
+
 
         #####################
         # TODO: Implement your SGD here by taking gradient steps on a sequence
@@ -511,8 +645,26 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         # instead of iterating over
         #     read_trigrams(file)
         #####################
+        epochs = 10
+        C = self.l2
+        print(f"Training from corpus {file}")
+        for epoch in range(1, epochs+1):
+            for (xt, yt, zt) in tqdm.tqdm(read_trigrams(file, self.vocab), initial=(epoch-1)*N, total=N*epochs):
+                L2 = self.regularizer(C, N, self.X, self.Y)
+                F = self.log_prob_tensor(xt,yt,zt) - L2
+                (-F).backward()
+                optimizer.step()
+                optimizer.zero_grad()    
+            
+            print(f"---epoch {epoch}: F = {F}")
+
+        print(f"Finished training on {N} tokens")
+
+
 
         log.info("done optimizing.")
+
+        return self.X, self.Y
 
         # So how does the `backward` method work?
         #

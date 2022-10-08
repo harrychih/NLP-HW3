@@ -25,6 +25,7 @@ import sys
 
 from pathlib import Path
 from time import gmtime
+from timeit import repeat
 from xmlrpc.client import FastMarshaller
 
 import torch
@@ -428,8 +429,8 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
         # We can also store other tensors in the model class,
         # like constant coefficients that shouldn't be altered by
         # training, but those wouldn't use nn.Parameter.
-        self.X = nn.Parameter(torch.ones((self.dim, self.dim)), requires_grad=True)
-        self.Y = nn.Parameter(torch.ones((self.dim, self.dim)), requires_grad=True)
+        self.X = nn.Parameter(torch.zeros((self.dim, self.dim)), requires_grad=True)
+        self.Y = nn.Parameter(torch.zeros((self.dim, self.dim)), requires_grad=True)
 
     def read_lexicon(self, lexicon_file: Path) -> tuple(dict, np.array):
         with open(lexicon_file) as f:
@@ -664,8 +665,7 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
 
         log.info("done optimizing.")
 
-        return self.X, self.Y
-
+        return
         # So how does the `backward` method work?
         #
         # As Python sees it, your parameters and the values that you compute
@@ -689,8 +689,6 @@ class EmbeddingLogLinearLanguageModel(LanguageModel, nn.Module):
 
 
 class ImprovedLogLinearLanguageModel(EmbeddingLogLinearLanguageModel):
-    # TODO: IMPLEMENT ME!
-    
     # This is where you get to come up with some features of your own, as
     # described in the reading handout.  This class inherits from
     # EmbeddingLogLinearLanguageModel and you can override anything, such as
@@ -715,4 +713,90 @@ class ImprovedLogLinearLanguageModel(EmbeddingLogLinearLanguageModel):
     # * You could use a different optimization algorithm instead of SGD, such
     #   as `torch.optim.Adam` (https://pytorch.org/docs/stable/optim.html).
     #
-    pass
+    def __init__(self, vocab: Vocab, lexicon_file: Path, l2: float) -> None:
+        super().__init__(vocab, lexicon_file, l2)
+
+        self.X_OOV = nn.Parameter(torch.zeros((self.dim, 1)), requires_grad=True)
+        self.Y_OOV = nn.Parameter(torch.zeros((self.dim, 1)), requires_grad=True)
+    
+    def oov_weights(self, x: Wordtype, y: Wordtype) -> TensorType[()]:
+        vocab_dict = self.vocab_dict
+        vocab_vec = self.vocab_vec
+        
+        x_idx = vocab_dict[self.missing_word_replace(x)]
+        x_vec = torch.tensor(vocab_vec[x_idx], dtype=self.X.dtype).reshape((1,self.dim))#.to(device)
+        y_idx = vocab_dict[self.missing_word_replace(y)]
+        y_vec = torch.tensor(vocab_vec[y_idx], dtype=self.Y.dtype).reshape((1,self.dim))#.to(device)
+
+        log_prob_z = x_vec @ self.X_OOV + y_vec @ self.Y_OOV 
+        norm_const = super().calculate_normalized_constant(x,y)
+        log_normalized_const = torch.logsumexp(norm_const, 0)#.to(device)
+
+        log_prob_z_xy = log_prob_z - log_normalized_const
+
+        return log_prob_z_xy
+
+
+    def log_prob_tensor_improved(self, x: Wordtype, y: Wordtype, z: Wordtype) -> TensorType[()]:
+        if z != "OOV": 
+            return super().log_prob_tensor(x, y, z)
+        else:
+            return super().log_prob_tensor(x, y, z) + self.oov_weights(x,y)
+            
+
+    def train(self, file: Path):
+        # super().train(file)
+
+        # Optimization hyperparameters.
+        gamma0 = 1e-4  # initial learning rate
+        epochs = 10
+        C = self.l2
+
+        # This is why we needed the nn.Parameter above.
+        # The optimizer needs to know the list of parameters
+        # it should be trying to update.
+        optimizer = optim.Adam(self.parameters(), lr=gamma0)
+
+        # Initialize the parameter matrices to be full of zeros.
+        nn.init.zeros_(self.X)   # type: ignore
+        nn.init.zeros_(self.Y)   # type: ignore
+        nn.init.zeros_(self.X_OOV)   # type: ignore
+        nn.init.zeros_(self.Y_OOV)   # type: ignore
+
+        N = num_tokens(file)
+        batchs = N // 10
+        log.info(f"Start optimizing on {N} training tokens...")
+
+
+        # x = draw_trigrams_forever(file, self.vocab, True)
+  
+        # for i in range(10):
+        #     print(next(x), end=", ")
+
+        ## Added Random Batch gradient "ascent" with adam optimizer
+
+        print(f"Training from corpus {file}")
+        for epoch in range(1, epochs+1):
+            for batch in range(batchs):
+                vocabs = []
+                rand = next(draw_trigrams_forever(file, self.vocab, True))
+                for i in range(batchs):
+                    vocabs.append(rand)
+                ctr = 1
+                for xt,yt,zt in tqdm.tqdm(vocabs, initial=ctr*epoch*batch, total=batchs*epochs):
+                    ctr += 1
+                    L2 = super().regularizer(C, N, self.X, self.Y) 
+                    F = self.log_prob_tensor_improved(xt,yt,zt) - L2
+                    (-F).backward()
+                    optimizer.step()
+                    optimizer.zero_grad()    
+
+                print(f"---epoch {epoch} ---- batch {batch}: F = {F}")
+
+        print(f"Finished training on {N} tokens")
+
+
+
+        log.info("done optimizing.")
+
+        return
